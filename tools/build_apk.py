@@ -122,16 +122,53 @@ def find_jdk():
     return None
 
 
+def _sdk_has_needed_build_tools(path):
+    return bool(path) and os.path.exists(
+        os.path.join(path, "build-tools", BUILD_TOOLS_VERSION))
+
+
 def find_sdk():
-    """依次从环境变量、脚本同级目录寻找 Android SDK。"""
-    for var in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+    """
+    寻找 Android SDK。
+
+    ⚠️ 顺序很关键：GitHub Actions 的 ubuntu 镜像**预装了** Android SDK 并设置了
+    ANDROID_SDK_ROOT / ANDROID_HOME，但里面没有本项目需要的 build-tools 30.0.3。
+    所以不能无条件信任环境变量，必须优先选「真的含有目标 build-tools」的那一个。
+    """
+    candidates = []
+    local = os.path.join(HERE, "android-sdk")       # fetch_sdk.py 下载的，最优先
+    if os.path.isdir(local):
+        candidates.append(local)
+    for var in ("HAF1_SDK", "ANDROID_SDK_ROOT", "ANDROID_HOME"):
         p = os.environ.get(var)
-        if p and os.path.isdir(os.path.join(p, "build-tools")):
-            return os.path.abspath(p)
-    local = os.path.join(HERE, "android-sdk")
-    if os.path.isdir(os.path.join(local, "build-tools")):
-        return local
+        if p:
+            ap = os.path.abspath(p)
+            if ap not in candidates:
+                candidates.append(ap)
+
+    for c in candidates:                            # 先要版本对得上的
+        if _sdk_has_needed_build_tools(c):
+            return c
+    for c in candidates:                            # 退一步，交给 preflight 报缺什么
+        if os.path.isdir(os.path.join(c, "build-tools")):
+            return c
     return None
+
+
+def describe_sdk(sdk):
+    """列出某个 SDK 里实际有什么，用于定位「找到的 SDK 版本不对」这类问题。"""
+    if not sdk or not os.path.isdir(sdk):
+        return "      (目录不存在)"
+    lines = []
+    for sub in ("build-tools", "platforms"):
+        d = os.path.join(sdk, sub)
+        if os.path.isdir(d):
+            try:
+                names = sorted(os.listdir(d))
+            except OSError:
+                names = []
+            lines.append("      %-12s: %s" % (sub, ", ".join(names) if names else "(空)"))
+    return "\n".join(lines) if lines else "      (既无 build-tools 也无 platforms)"
 
 
 def log(msg):
@@ -213,6 +250,20 @@ def preflight():
         print("构建前置检查未通过：", file=sys.stderr)
         for p in problems:
             print("  - " + p, file=sys.stderr)
+        print("", file=sys.stderr)
+        print("诊断信息：", file=sys.stderr)
+        print("  选中的 JDK : %s" % (JDK or "(未找到)"), file=sys.stderr)
+        print("  选中的 SDK : %s" % (SDK or "(未找到)"), file=sys.stderr)
+        print("  需要的版本 : build-tools %s / platforms %s"
+              % (BUILD_TOOLS_VERSION, PLATFORM), file=sys.stderr)
+        print("  该 SDK 实际有：", file=sys.stderr)
+        print(describe_sdk(SDK), file=sys.stderr)
+        print("  相关环境变量：", file=sys.stderr)
+        for var in ("HAF1_SDK", "ANDROID_SDK_ROOT", "ANDROID_HOME", "HAF1_JDK", "JAVA_HOME"):
+            print("      %-17s= %s" % (var, os.environ.get(var, "(未设置)")), file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  提示：运行 `python fetch_sdk.py` 会下载所需的最小工具集，"
+              "默认落在 tools/android-sdk/。", file=sys.stderr)
         raise SystemExit(2)
 
 

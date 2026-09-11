@@ -40,6 +40,11 @@ jobs:
 
       - name: Build APK
         run: python3 tools/build_apk.py --out Android_HA_Viewer.apk
+        env:
+          # runner 镜像预装了 Android SDK 并设了 ANDROID_SDK_ROOT，
+          # 但里面没有 build-tools 30.0.3。这里显式指到刚下载的那一份，
+          # 免得被环境变量带偏（build_apk.py 自己也已优先选版本匹配的 SDK）。
+          HAF1_SDK: ${{ github.workspace }}/tools/android-sdk
 
       - name: Show APK info
         run: ls -l Android_HA_Viewer.apk
