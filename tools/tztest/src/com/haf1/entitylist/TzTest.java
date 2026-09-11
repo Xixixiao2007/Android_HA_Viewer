@@ -206,33 +206,45 @@ public class TzTest {
         }
         eq("截断帧 -> 抛异常", Boolean.valueOf(threw), Boolean.TRUE);
 
-        // ---------- 7) 跨通道去重：实时推送 vs 历史库的时间戳精度差异 ----------
+        // ---------- 7) 历史接口的「期初状态」必须被丢弃 ----------
+        // 这是"同一条消息显示两遍"的真正原因：HA 在历史响应开头塞一条期初状态，
+        // 并把它的 last_changed 设成我们请求的起始时刻，而不是该状态真正变更的时间。
         System.out.println();
-        System.out.println("== Change.dedupKey：跨通道去重 ==");
+        System.out.println("== HaClient.isSyntheticStartState ==");
 
-        // 同一次变化：WebSocket 来自实时状态机（带微秒），REST 读库时微秒被抹掉
-        long wsTime = HaClient.parseIso("2026-09-05T14:23:05.123456+00:00");
-        long dbTime = HaClient.parseIso("2026-09-05T14:23:05+00:00");
-        eq("两种精度解析出的毫秒确实不同（bug 的来源）",
-                Boolean.valueOf(wsTime != dbTime), Boolean.TRUE);
-        eq("但去重键相同 -> 不会重复显示",
-                Change.dedupKey(wsTime, "25.3"), Change.dedupKey(dbTime, "25.3"));
+        long reqStart = HaClient.parseIso("2026-09-11T12:20:53+00:00");
+        long stamped  = HaClient.parseIso("2026-09-11T12:20:53+00:00");
+        long realPrev = HaClient.parseIso("2026-09-11T12:19:46.072085+00:00");
 
-        eq("截断到毫秒也能对上",
-                Change.dedupKey(wsTime, "25.3"),
-                Change.dedupKey(HaClient.parseIso("2026-09-05T14:23:05.123+00:00"), "25.3"));
-
-        eq("同一秒内不同值 -> 不同键（不能回退成按毫秒去重）",
-                Boolean.valueOf(!Change.dedupKey(wsTime, "A").equals(Change.dedupKey(wsTime, "B"))),
+        eq("首条 + 完整字段 + 时间==请求起点  -> 判为期初状态，丢弃",
+                Boolean.valueOf(HaClient.isSyntheticStartState(0, stamped, reqStart, true)),
                 Boolean.TRUE);
+        eq("时间不等于请求起点 -> 是真实变化，保留",
+                Boolean.valueOf(HaClient.isSyntheticStartState(0, realPrev, reqStart, true)),
+                Boolean.FALSE);
+        eq("不是首条 -> 不丢（末条也带完整字段，但它是真实变化）",
+                Boolean.valueOf(HaClient.isSyntheticStartState(1, stamped, reqStart, true)),
+                Boolean.FALSE);
+        eq("不带 entity_id（中间的精简条目）-> 不丢",
+                Boolean.valueOf(HaClient.isSyntheticStartState(0, stamped, reqStart, false)),
+                Boolean.FALSE);
 
-        eq("不同秒的相同值 -> 不同键",
-                Boolean.valueOf(!Change.dedupKey(wsTime, "A")
-                        .equals(Change.dedupKey(wsTime + 1000L, "A"))),
-                Boolean.TRUE);
+        System.out.println();
+        System.out.println("== Change.key 用原始 last_changed 字符串 ==");
+        String rawTs = "2026-09-11T12:20:53.234382+00:00";
+        Change k1 = new Change(HaClient.parseIso(rawTs), "CAR 44 (HAM) ...", rawTs);
+        Change k2 = new Change(HaClient.parseIso(rawTs), "CAR 44 (HAM) ...", rawTs);
+        eq("同一次变化（两条通道给相同字符串）-> 同键", k1.key(), k2.key());
 
-        Change cc = new Change(wsTime, "x", "2026-09-05T14:23:05.123456+00:00");
-        eq("Change.key() 与静态方法一致", cc.key(), Change.dedupKey(wsTime, "x"));
+        Change k3 = new Change(HaClient.parseIso("2026-09-11T12:20:53+00:00"),
+                "CAR 44 (HAM) ...", "2026-09-11T12:20:53+00:00");
+        eq("被改写过时间戳的期初状态 -> 不同键（所以必须丢弃它，而不是靠去重兜底）",
+                Boolean.valueOf(!k1.key().equals(k3.key())), Boolean.TRUE);
+
+        Change k4 = new Change(1000L, "A", "t-a");
+        Change k5 = new Change(1000L, "B", "t-b");
+        eq("同一秒内不同值 -> 不同键（原始字符串键不会误合并）",
+                Boolean.valueOf(!k4.key().equals(k5.key())), Boolean.TRUE);
 
         System.out.println("==================================================");
         System.out.println("  通过 " + pass + " 项，失败 " + fail + " 项");

@@ -5,6 +5,10 @@ public class JSONObject {
     public JSONObject(String s) throws JSONException {
     }
 
+    public boolean has(String name) {
+        return false;
+    }
+
     public String optString(String name) {
         return "";
     }

@@ -149,6 +149,11 @@ public class HaClient {
      * HA 返回的是「数组的数组」：
      *   [[ {"state":"24.9","last_changed":"2026-09-05T14:20:12+08:00"}, ... ]]
      * minimal_response 下只有首个和末个条目带完整字段，中间只有 state + last_changed。
+     *
+     * ⚠️ **必须丢掉响应里的首个条目**：那是 HA 合成的「期初状态」（该区间开始时仍然生效
+     * 的那个值），它的 last_changed 被设成了**我们请求的起始时刻**，而不是这个状态真正
+     * 变更的时间。若不丢，它就会顶着「最新一条变化的时间」再出现一次 —— 这就是同一条
+     * 消息显示两遍的原因（实测见 CHANGELOG v1.4）。
      */
     public static List<Change> fetchHistory(Prefs p, long startMillis, long endMillis)
             throws HaException {
@@ -183,12 +188,32 @@ public class HaClient {
                 if (t <= 0) {
                     continue;
                 }
+                if (isSyntheticStartState(i, t, startMillis, o.has("entity_id"))) {
+                    continue;
+                }
                 out.add(new Change(t, st, ts));
             }
         } catch (Exception e) {
             throw new HaException(-2, "返回内容无法解析：" + e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * 判断某个历史条目是不是 HA 合成的「期初状态」。
+     *
+     * 三条判据同时满足才算（纯函数，便于单测）：
+     *   1. 是响应里的第一条；
+     *   2. 带完整字段（有 entity_id）—— minimal_response 下只有期初状态和末条带完整字段；
+     *   3. 它的时间戳正好落在我们请求的起始秒上。
+     *
+     * 末条同样带完整字段，但它是真实变化，靠第 1 条判据排除。
+     */
+    static boolean isSyntheticStartState(int index, long entryTimeMillis,
+                                         long startMillis, boolean hasEntityId) {
+        return index == 0
+                && hasEntityId
+                && (entryTimeMillis / 1000L) == (startMillis / 1000L);
     }
 
     // ------------------------------------------------------------------

@@ -6,7 +6,7 @@ public class Change {
     public final long time;
     /** 变化后的值文本。 */
     public final String state;
-    /** HA 返回的原始 last_changed 字符串（仅用于排查，不用于去重）。 */
+    /** HA 返回的原始 last_changed 字符串。 */
     public final String raw;
 
     public Change(long time, String state, String raw) {
@@ -16,29 +16,17 @@ public class Change {
     }
 
     /**
-     * 去重键：**秒级时间戳 + 值**。
+     * 去重键：**HA 原始的 last_changed 字符串**。
      *
-     * 为什么不能用原始的 last_changed 字符串做键：
-     * 同一次状态变化，两条通道给出的时间戳精度不同 ——
-     *   WebSocket 的 to_state.last_changed 来自内存里的实时状态机，带微秒；
-     *   REST 历史接口读的是 recorder 数据库，微秒已被抹掉。
-     * HA 自己也要为此做兼容（core PR #71704 里的 floored_timestamp，
-     * 对应测试名 test_end_time_with_microseconds_zeroed）。
+     * 曾经担心 WebSocket（实时状态机、带微秒）与 REST（历史库）精度不同，
+     * 一度改成「秒级时间戳 + 值」。后来对真实 HA 实测证明：两条通道对同一次变化
+     * 给出的 last_changed 与 state **逐字节相同**，那个担心是多余的。
+     * 用原始字符串做键最精确，也不会把同一秒内的两次不同变化误合并。
      *
-     * 于是 "2026-09-05T14:23:05.123456+00:00" 与 "2026-09-05T14:23:05+00:00"
-     * 会被当成两条不同的记录 —— 表现为同一条变化在 60 秒对账后重复出现。
-     *
-     * 用秒级粒度可同时兼容「抹掉微秒」「截断到毫秒」等不同数据库的行为。
-     *
-     * 代价：同一秒内「值也恰好相同」的两次变化会被合并成一条
-     * （例如 A→B→A 发生在同一秒内）。这远比系统性重复轻微，且实际极少发生。
+     * 真正造成重复的是历史接口开头那条「期初状态」（时间戳被改写成请求起始时刻），
+     * 已在 HaClient.fetchHistory 里丢弃 —— 见 HaClient.isSyntheticStartState。
      */
-    public static String dedupKey(long timeMillis, String state) {
-        return (timeMillis / 1000L) + "\u0000" + (state == null ? "" : state);
-    }
-
-    /** 本记录的去重键。 */
     public String key() {
-        return dedupKey(time, state);
+        return raw;
     }
 }
