@@ -1,0 +1,32 @@
+# 构建产物
+build/
+*.apk
+*.idsig
+*.ap_
+*.dex
+
+# 签名密钥 —— 千万不要提交，详见 README 的「关于签名密钥」
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+
+# 下载的 Android 工具集（由 tools/fetch_sdk.py 生成，约 236 MB）
+android-sdk/
+_dl_cache/
+
+# 测试中间产物
+tools/tztest/out/
+tools/tztest/javac.args
+
+# Python
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

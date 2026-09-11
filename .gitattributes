@@ -1,0 +1,9 @@
+# 统一用 LF 换行，避免 Windows 上提交后 CI（Linux）读到 CRLF
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.apk binary
+*.jar binary
+*.keystore binary
+*.idsig binary

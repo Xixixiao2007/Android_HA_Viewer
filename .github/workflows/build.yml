@@ -1,0 +1,44 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-tools 30.0.3 的 d8 只需要 JDK 8，所以整条链路用 8 就够
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build-tools and platform
+        run: sdkmanager "platforms;android-23" "build-tools;30.0.3"
+
+      - name: Run unit tests
+        run: python3 tools/run_tests.py
+
+      - name: Build APK
+        run: python3 tools/build_apk.py --out Android_HA_Viewer.apk
+
+      - name: Show APK info
+        run: ls -l Android_HA_Viewer.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android_HA_Viewer-apk
+          path: Android_HA_Viewer.apk
+          if-no-files-found: error
