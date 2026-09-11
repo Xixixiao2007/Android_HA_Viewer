@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-桌面端单元测试：验证 HaClient 的时间解析与 Prefs 的筛选逻辑。
+桌面端单元测试。
 
-用桌面 JDK 8 编译真实的 app 源码（HaClient/Prefs/Change），
-配合 tztest/stub 下的极简 android.* / org.json 桩。
+用桌面 JDK 编译真实的 app 源码（HaClient / Prefs / Change / WsFrame），
+配合 tztest/stub 下的极简 android.* / org.json 桩，因此不需要 Android 设备。
 
-用法: python dsh/tools/run_tests.py
+覆盖：ISO8601 时间解析与生成、时区往返、黑白名单判定、刷新间隔钳制、
+      RFC 6455 WebSocket 帧编解码。
+
+用法: python tools/run_tests.py
 """
 import os
 import shutil
@@ -14,6 +17,10 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import build_apk  # noqa: E402  复用它的 JDK 探测与平台适配
+
 T = os.path.join(HERE, "tztest")
 OUT = os.path.join(T, "out")
 _root = os.path.dirname(HERE)
@@ -26,7 +33,6 @@ for _c in (os.path.join(_root, "app"), os.path.join(_root, "apk"),
 if _proj is None:
     _proj = os.path.join(_root, "app")
 APPSRC = os.path.join(_proj, "src", "com", "haf1", "entitylist")
-JDK = r"C:\Program Files\Android\jdk\jdk-8.0.302.8-hotspot\jdk8u302-b08"
 
 
 def collect(root):
@@ -39,6 +45,20 @@ def collect(root):
 
 
 def main():
+    jdk = build_apk.find_jdk()
+    if jdk is None:
+        print("[test] 找不到 JDK。请安装 JDK 8~17，"
+              "或设置环境变量 HAF1_JDK / JAVA_HOME 指向 JDK 根目录。", file=sys.stderr)
+        return 2
+
+    javac = os.path.join(jdk, "bin", build_apk.exe("javac"))
+    java = os.path.join(jdk, "bin", build_apk.exe("java"))
+    if not os.path.exists(javac):
+        print("[test] JDK 里没有 javac: %s" % javac, file=sys.stderr)
+        return 2
+
+    print("[test] JDK: %s" % jdk)
+
     shutil.rmtree(OUT, ignore_errors=True)
     os.makedirs(OUT)
 
@@ -52,7 +72,6 @@ def main():
     with open(argfile, "w", encoding="utf-8") as f:
         f.write("\n".join('"%s"' % p.replace("\\", "/") for p in sources))
 
-    javac = os.path.join(JDK, "bin", "javac.exe")
     print("[test] 编译 %d 个源文件" % len(sources))
     p = subprocess.run([javac, "-J-Duser.language=en", "-J-Duser.country=US",
                         "-encoding", "UTF-8", "-d", OUT, "@" + argfile],
@@ -64,7 +83,6 @@ def main():
         print("[test] 编译失败")
         return 1
 
-    java = os.path.join(JDK, "bin", "java.exe")
     print("[test] 运行 TzTest")
     print()
     p = subprocess.run([java, "-cp", OUT, "com.haf1.entitylist.TzTest"],
