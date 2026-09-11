@@ -206,6 +206,34 @@ public class TzTest {
         }
         eq("截断帧 -> 抛异常", Boolean.valueOf(threw), Boolean.TRUE);
 
+        // ---------- 7) 跨通道去重：实时推送 vs 历史库的时间戳精度差异 ----------
+        System.out.println();
+        System.out.println("== Change.dedupKey：跨通道去重 ==");
+
+        // 同一次变化：WebSocket 来自实时状态机（带微秒），REST 读库时微秒被抹掉
+        long wsTime = HaClient.parseIso("2026-09-05T14:23:05.123456+00:00");
+        long dbTime = HaClient.parseIso("2026-09-05T14:23:05+00:00");
+        eq("两种精度解析出的毫秒确实不同（bug 的来源）",
+                Boolean.valueOf(wsTime != dbTime), Boolean.TRUE);
+        eq("但去重键相同 -> 不会重复显示",
+                Change.dedupKey(wsTime, "25.3"), Change.dedupKey(dbTime, "25.3"));
+
+        eq("截断到毫秒也能对上",
+                Change.dedupKey(wsTime, "25.3"),
+                Change.dedupKey(HaClient.parseIso("2026-09-05T14:23:05.123+00:00"), "25.3"));
+
+        eq("同一秒内不同值 -> 不同键（不能回退成按毫秒去重）",
+                Boolean.valueOf(!Change.dedupKey(wsTime, "A").equals(Change.dedupKey(wsTime, "B"))),
+                Boolean.TRUE);
+
+        eq("不同秒的相同值 -> 不同键",
+                Boolean.valueOf(!Change.dedupKey(wsTime, "A")
+                        .equals(Change.dedupKey(wsTime + 1000L, "A"))),
+                Boolean.TRUE);
+
+        Change cc = new Change(wsTime, "x", "2026-09-05T14:23:05.123456+00:00");
+        eq("Change.key() 与静态方法一致", cc.key(), Change.dedupKey(wsTime, "x"));
+
         System.out.println("==================================================");
         System.out.println("  通过 " + pass + " 项，失败 " + fail + " 项");
         System.out.println("==================================================");

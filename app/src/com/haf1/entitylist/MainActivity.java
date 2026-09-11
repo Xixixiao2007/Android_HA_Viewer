@@ -59,8 +59,11 @@ public class MainActivity extends Activity {
     private RowAdapter adapter;
 
     /**
-     * 全部变化记录，键 = HA 原始的 last_changed 字符串。
-     * 用原始字符串而非毫秒时间戳做键：毫秒会截断微秒，同一毫秒内的两次变化会互相覆盖。
+     * 全部变化记录，键 = {@link Change#key()}（秒级时间戳 + 值）。
+     *
+     * 不能用 HA 原始的 last_changed 字符串做键：实时推送（带微秒）与历史库查询
+     * （微秒被抹掉）对同一次变化给出的字符串不同，会导致同一条记录重复出现。
+     * 详见 Change.dedupKey 的注释。
      */
     private final LinkedHashMap<String, Change> all = new LinkedHashMap<String, Change>();
     /** 已知最新一条变化的时间，增量拉取的起点。 */
@@ -420,13 +423,13 @@ public class MainActivity extends Activity {
         int addedShown = 0;
         for (int i = 0; i < items.size(); i++) {
             Change c = items.get(i);
-            if (!all.containsKey(c.raw)) {
+            if (!all.containsKey(c.key())) {
                 added++;
                 if (prefs.accept(c.state)) {
                     addedShown++;
                 }
             }
-            all.put(c.raw, c);
+            all.put(c.key(), c);
             if (c.time > newestTime) {
                 newestTime = c.time;
             }
